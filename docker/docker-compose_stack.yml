@@ -1,0 +1,127 @@
+version: "3"
+services: 
+  registry:
+    container_name: registry
+    image: registry:2.6
+    ports:
+      - 5000:5000
+    volumes:
+      - "./registry-data:/var/lib/registry"
+
+  manager:
+    container_name: manager
+    image: docker:18.05.0-ce-dind
+    privileged: true
+    tty: true
+    ports: 
+      - 8000:80
+      - 9000:9000
+    depends_on:
+      - registry
+    expose:
+      - 3375
+    command: "--insecure-registry registry:5000"
+    volumes:
+      - "./stack:/stack"
+
+  wroker01:
+    container_name: wroker01
+    image: docker:18.05.0-ce-dind
+    privileged: true
+    tty: true
+    depends_on:
+      - manager
+      - registry
+    expose:
+      - 7946
+      - 7946/udp
+      - 4789/udp
+    command: "--insecure-registry registry:5000"
+
+  wroker02:
+    container_name: wroker02
+    image: docker:18.05.0-ce-dind
+    privileged: true
+    tty: true
+    depends_on:
+      - manager
+      - registry
+    expose:
+      - 7946
+      - 7946/udp
+      - 4789/udp
+    command: "--insecure-registry registry:5000"
+
+  wroker03:
+    container_name: wroker03
+    image: docker:18.05.0-ce-dind
+    privileged: true
+    tty: true
+    depends_on:
+      - manager
+      - registry
+    expose:
+      - 7946
+      - 7946/udp
+      - 4789/udp
+    command: "--insecure-registry registry:5000"
+
+
+
+    swarm init 명령을 실행하여 클러스터로 동작하게 한다.(manager 역할을 맡김)
+    docker container exec -it manager docker swarm init
+
+    결과로 docker swarm join --token SWMTKN-1-2394ll08o2kgn1fpkdh4bpdhej9daup893x5fqdjxl2oldok6e-4pw9bo8o8k4jzy6zmbbdvp7f7 172.21.0.3:2377
+    join token을 사용하여 3대의 노드를 스웜 클러스터에 worker로 등록한다
+
+    docker container exec -it wroker01 docker swarm join `
+    --token SWMTKN-1-2394ll08o2kgn1fpkdh4bpdhej9daup893x5fqdjxl2oldok6e-4pw9bo8o8k4jzy6zmbbdvp7f7 manager:2377
+
+    docker container exec -it manager docker node ls
+    
+    //도커 레지스트리에 외부 이미지 등록하기
+    docker image tag gihyodocker/echo localhost:5000/gihyodocker/echo
+    
+    //registry 컨테이너에 이미지 등록하기
+    docker image push localhost:5000/gihyodocker/echo
+
+    docker container exec -it wroker01 docker image pull registry:5000/gihyodocker/echo
+
+    //서비스 생성
+    docker container exec -it manager `
+    docker service create --replicas 1 --publish 8000:8080 --name echo registry:5000/gihyodocker/echo
+    
+    //결과
+    docker container exec -it manager docker service ls
+ID                  NAME                MODE                REPLICAS            IMAGE                                   PORTS
+kgkik4dz893y        echo                replicated          1/1                 registry:5000/gihyodocker/echo:latest   *:8000->8080/tcp
+
+    //서비스가 제어하는 레플리카 늘리기
+    docker container exec -it manager docker service scale echo=6
+
+    docker container exec -it manager docker service ps echo | grep Running
+
+    //삭제 가능
+    docker service rm 서비스명
+
+    //스택 만들기 (오버레이 네트워크 서로 다른 호스트에서 만든 컨테이너끼리 통신하기 위해)
+    docker container exec -it manager docker network create --driver=overlay --attachable ch03
+
+
+    docker container exec -it manager docker stack deploy -c /stack/ch03-webapi.yml echo
+    
+    //상태 확인
+    docker container exec -it manager docker stack services echo
+
+    docker container exec -it manager docker stack ps echo 
+    
+    visualizer를 사용해 컨테이너 배치 시각화를 할 수 있다.
+
+    docker container exec -it manager docker stack deploy -c /stack/visualizer.yml visualizer
+
+    //proxy
+    ingerss.yml
+    docker container exec -it manager docker stack deploy -c /stack/ch03-webapi.yml echo
+    docker container exec -it manager docker stack deploy -c /stack/ch03-ingress.yml ingress
+    docker container exec -it manager docker service ls
+    

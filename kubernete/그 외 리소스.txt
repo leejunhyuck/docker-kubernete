@@ -1,0 +1,97 @@
+잡 리소스는
+    restratPolicy는 파드 종류 후 재실행 여부를 설정하는 속성이다.
+    이 속성을 Always로 설정 할수 없고 Never(실패 시 파드를 재성생해 실행), OnFailure(실패한 파드를 재실행)로 설정 해야 한다.
+
+    종료된 파드는 Completed로 나온다
+    kubectl get pod -l app=pingpong --show-all
+
+크론잡
+    일반적인 크론 작업은 서버의 크론탭으로 관리되는 데 반해, 크론잡 리소스는 매니페스트 파일로 정의된다.
+
+시크릿
+    쿠버네티스는 시프릿 리소스를 사용하면 이런 기밀 정보 문자열을 Base64 인코딩으로 만들 수 있다.
+
+    echo "your_username:$(opeenssl passwd -quiet -crypt your_password)" | base64
+    .httpasswd 파일을 생성하고 이 파일에 Base64로 변환된 문자열을 넣는다.
+    ->마운트하여 /ext/ngigx/secret/.htaccess 파일이 된다.
+
+    crul -i --user your_username:your_password http://127.0.0.1:30060로 결과 확인 가능
+
+    데이터베이스 접속 정보들도 인증정보 문자열을 암호화해서 환경변수로 저장해야한다.
+
+    echo -n "gihyo:gihyo@tcp(mysql-master:3306)/tododb?parseTime=true" | base64
+
+    name: mysql-secret
+    data:
+        username:인코딩된 값
+        password:인코딩된 값
+
+    env
+        valueForm:
+            secretKeyRef:
+                name: mysql-secret
+                key: username
+
+
+사용자 관리와 RBAC
+    명칭
+    일반 사용자 : 클러스터 외부에서 쿠버네티스를 조작하는 사용자로, 다양한 방법으로 인증을 거친다.
+    서비스 계정 : 쿠버네티스 내부적으로 관리되며 파드가 쿠버네티스 API를 다룰 때 사용하는 사용자
+
+    롤 : 각 쿠버네티스 api 사용 권한을 정의한다. 지정된 네이스페이스 안에서만 유요함
+    롤바인딩 : 일반 사용자 및 그룹/서비스 계정과 롤을 연결
+    클러스터롤 : 각 쿠버네티스 api의 사용권한을 정의한다. 클러스터 전체에서 유요함
+    클러스터롤바인딩 : 일반 사용자 및 그룹/서비스 계정과 클러스터롤을 연결
+
+    ClusterRole 리소스를 생성한다.
+    Role과 일반 사용자를 연결해 줄 ClusterRoleBinding 리소를 생성한다.
+
+    일반 사용자 및 일반 사용자 그룹 생성(인증 방식)
+        - 서비스 계정 토큰 방식
+        - 정적 토큰 파일 방식
+        - 패스워드 파일 방식(사용자와 패스워드를 파일에 정의하는 방식)
+        - X509 클라이언트 인증서 방식(클라이언트 인증서를 이용한 인증 방식)
+        - OpenID 방식(구글 등을 이용한 방식)
+
+    kubectl create serviceaccount gihyo-user
+
+    kubectl get serviceaccount gihyo-user -o yaml
+
+    출력 결과 : secrets: -name : 여기
+
+    kubectl get secret 여기 -o yaml 
+    출력 결과 : data.token 부분이 계정의 인증에 사용되는 토큰이다.
+    이를 base64로 인코딩 하여 보관한다.
+
+    api를 호출해 쿠버네티스 클러스터의 마스터 노드에 접근하여 ~/.kube/config yaml파일이 설정 되어있는데  다음 명령어로 접근 가능하다.
+    kubectl config view 
+
+    ~/.kube/config 에서 current-context의 값이 현재 사용 정보 컨텍스트는 '쿠버네티스 클러스터 api를 사용하는 주체가 되는 일반 사용자를 결정하는 정보'이다
+
+    //서비스 유저에 토큰을 설정 한다.
+    kubectl config set-credential gihyo-user --toker=base64 토큰
+
+    //user로 지정한 클러스터를 조작할 수 있게 하기 위한 것이다.
+    kubectl config set-context gihyo-k8s-gihyo-user --cluster=gihyo-k8s --user=gihyo-user
+    
+    //context 전환
+    kubectl config use-context gihyo-k8s-user
+
+    //전환된 
+    kubectl get pod --all-namespaces
+    파드 목록 확인
+
+    //방금 설정한 유저는 파드 목록 확인 외의 권한을 갖고 있지 않기 때문에 다음에서 보듯이 디플로이먼트 등 다른 리소스를 참고 할 수 없다.
+    kubectl get deployment --all-namespaces
+
+    개발 환경에서 RBAC를 사용한 권한 관리 예이다.
+        admin,deployer,viewer로 그룹을 생성한 다음, 일반 사용자를 적절한 그룹으로 나눠 서비스 및 인그레스의 변경 권한을 일반 사용자에 부여.
+        대규모 구성 변경이 따르는 작업은 더 높은 권한을 갖는 전용 일반 사용자로 전환해 수행하며, 이 일반 사용자는 극치 제한 된 인원만 사용하도록 함.
+
+     파드 정의 에서 serviceName값에 서비스 계정이름을 지정하면(gihyo-pod-reader)
+     kubectl -n kube-system logs -f gihyo-pod-reader
+     출력 결과 OK
+
+     kubectl -n kube-system logs -f gihyo-pod-reader (deployment)
+     출력 결과 X
+

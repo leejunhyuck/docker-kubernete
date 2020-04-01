@@ -1,0 +1,63 @@
+각 컨테이너가 맡을 역할을 적절히 나누고, 그 역할에 따라 배치한 컨테이너를 복제해도 전체 구조에서 부작용이 일어나지 않는가?
+
+multi-stage build 메커니즘 (실행용과 빌드용을 분리해서 사용)
+
+이식성이 높은 애플리케이션
+    - 환경 변수 활용 (이식성을 중시하는 도커환경에서 외부에서 동작을 제어할 수 있게 해야 한다.)
+      - 실행 시 인자
+      - 설정 파일
+      - 애플리케이션 동작을 환경 변수로 제어 -V (이미지를 다시빌드 하지 않아도 됨)
+      - 설정 파일에 환경 변수를 포함 (컨테이너를 실행 시에 전달하는 형태로 사용)
+    
+
+    docker container prune 실행중이 아닌 모든 컨테이너를 삭제하는 명령
+    docker image prune 실행중이 아닌 모든 이미지 삭제하는 명령 
+    docker system prune 사용하지 않는 도커 이미지, 컨테이너,볼륨, 네트워크 등 모든 도커 리소스를 일괄적으로 삭제 
+
+    ssh 키 생성
+    docker container exec -it master ssh-keygen -t rsa -C " "
+
+    dovker container -v 데이터 볼륨 설정
+
+
+
+    스웜 todo 실습
+
+    tododb image build 
+    docker image tag todo:lateste localhost:5000/ch04/tododb:lateste  //레파지토리에 등록
+    레파지토리에 푸쉬하기 host와 레파지토이는 5000으로 포트포워딩 되어있어서 푸쉬하면 된다.
+    
+    스웜으로 배포하기 
+    stack deploy -c 
+
+    docker container exec -it manager `
+    docker service ps todo_mysql_master --no-trunc `
+    --filter "desired-state=running"   //아이디 찾기
+
+    노드ID와 태스크ID를 통하여 원하는 정보를 컨테이너에 넣을수있따.
+    docker container exec -it manager `
+    docker service ps todo_mysql_master `
+    --no-trunc `
+    --filter "desired-state=running" `
+    --format "docker container exec -it {{.Node}} docker container exec -it {{.Name}}.{{.ID}} bash"
+
+    docker container exec -it manager docker container exec -it 0a589380d741 docker container exec -it todo_mysql_master.1.mngnalotghcpp1fyfih5yhw0u
+    
+    docker container exec -it manager docker container exec -it 80ba9f31807f docker container exec -it todo_mysql_master.1.ilrurxh5m98t `
+    init-data.sh
+
+    docker container exec -it manager docker container exec -it 80ba9f31807f docker container exec -it todo_mysql_master.1.ilrurxh5m98t `
+    mysql -u gihyo -pgihyo todob
+
+    //웹서버
+    nginx의 튜닝을 위한 설정은 환경변수로 설정값을 사용하면 편하고 이식성도 향상된다.
+
+    방법에는 entrykit 템플릿 기능이 있다.(tmpl파일)
+
+    정적 파일을 다루는 방법
+      정적 파일은 다음과 같이 웹 애플리케이션을 거치지 않고 nginx에서 바로 응답을 처리하도록 한다.
+      
+      nginx ->(proxy) web
+      이미지           
+
+                      이미지 디렉터리 볼륨컨테이너로 공유

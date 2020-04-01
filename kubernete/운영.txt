@@ -1,0 +1,251 @@
+운영
+
+1. 로깅 운영
+    도커에서는 로그 라이브러리를 사용해도 로그가 파일이 아니라 표준 출력으로 출력하고 이를 다시
+    Fluentd 같은 로그 컬렉터로 수집하는 경우가 많다.
+
+    docker container run -it --im -p 8000:8000 이름
+
+    호스트에 컨테이너 데이터가 저장된 디렉터리인 /var/lib/docker/container/컨테이너ID-json.log
+
+    도커에서는 호스트에 위치한 로그파일을 컨테이너와 공유하는 방법으로 -v 옵션을 사용한다.
+
+    - 로깅 드라이버
+        도커 컨테이너의 로그가 JSON 포맷으로 출력되는 이유는 도커에 json-file이라는 기본 로깅 드라이버가 있기
+        때문이다.
+        syslog syslog로 로그를 관리
+        journald systemd로 로그를 관리
+        awslogs aws cloudwatch 로그를 관리
+        gcplogs 구글 클라우드 로깅으로 관리
+        Fluentd Fluentd로 로그를 관리
+
+    - 컨테이너 로그의 로테이션
+        도커 컨테이너에는 로깅 동작을 제어하는 옵션인 --log-opt가 있어서 도커 컨테이너의 로그 로테이션을 설정
+        할 수 있다.
+        max-size는 로테이션이 발생하는 로그 파일 최대 크기이며 k/m/g/ 단위로 지정 할 수 있고,
+        max-file은 최대 파일 개수를 의미 하며 파일 개수가 이 값을 초과할 경우 오래된 파일부터 삭제된다.
+        docker container run -it --rm -p 8080:9000 `
+        --log-opt max-size=1m `
+        --log-opt max-file=5 `
+        container 이름
+        ls -ls *log* 설정한 파일 크기게 도달하면 다음과 같이 파일이 로테이션된다.
+
+        도커 데몬에서 log-opts 기본값으로 설정할 수 있다.
+        윈도우 : Preference 화면에서 Daemon 탭에서 Advanced 항목에서 json 포맷으로 설정가능
+        {
+            "log-driver":"json-file",
+            "log-opts":{
+                "max-size":"10m",
+                "max-file":"5",
+            }
+        }
+        리눅스 : /etc/docker/daemon.json
+
+    Fluentd로 로그를 수집하고 Elasticsearch로 저장 및 검색한다. 또한, Kibana로 데이터 시각화 도구를 사용하여
+    로그를 열람한다.
+
+    Elasticsearch는 jvm.opstions라는 설정 파일을 마운트 한다. 기본 사이즈는 2GC라 이를 Xms128m , Xmx256m로 수정한다
+
+    Fluentd.conf라는 이름으로 작성한 다음, Elasticsearch로 로그를 전송하게끔 설정을 추가한다.
+    flush.interval 값이 로그를 Elasticsearch로 보내는 시간 간격이다.
+    Elasticsearch는 Fluentd에서 로그를 전달받아 데이터파일에 인덱스를 생성한다.
+
+    이 인덱스는 crul http://localhost:9200/_cat/indices?v로 확인 가능하다.
+
+fluentd 로깅 드라이브 운영 구조(사진)
+    각 모든 호스트에 fluentd를 배치하고 항상 가동 상태를 유지한다.
+    클라우드를 사용하는 경우에는 가상 머신 이미지에 fluentd를 포함시키거나 애플리케이션 컨테이너를 배포하기전에
+    프로비저닝을 통해 fluentd를 배치하는 것이 효과적이다.
+    
+    또한 fluentd를 모니터링 할 때는,
+    buffer_queue_length: 버퍼에 저장된 청크의 수
+    buffer_total_queue_size: 버퍼에 저장된 청크의 크기 합
+    retry_count: 재시도 횟수
+
+    fluenct.conf 파일에 monitor_agent를 설정해 이 항목의 상태를 확인할 수 있다.
+    <source>
+        @type monitor_agent
+        bind 0.0.0.0
+        port 24220
+    </source>
+
+    monitor_agent sensu 플러그인도 제공하므로 fluenct를 모니터링 할 수 있다.
+
+    Elasticsearch는 즉시성과 검색에 유리하지만, 저장 단가가 높기 때문에 로그를 장기 저장하는 데는
+    오브젝트 스토리지가 더 적합하다 fluenct에서 Elasticsearch와 오브젝트 스토리지 양쪽 모두로 로그를 전송하고
+    최근 로그는 일정기간 Elasticsearch에서 다루면 비용을 절감 할 수 있다.
+
+쿠버네티스 로그 적용 
+    Elasticsearch_URL의 값에 Elasticsearch 서비스에 대한 URL을 지정한다.
+    DaemonSet로 fluenct를 구축한다.
+    DaemonSet은 파드를 관리하는 리소스로, 모든 노드에 하나씩 배치된다. 
+    * 로그 컬렉터같이 호스트마다 특정한 역할을 하는 에이전트를 두고자 할 떄 적합하다.
+    fluenct/fluenct-kubernetes-daemonset를 사용한다 이것이 도커의 로깅 드라이버 역할을 대신할 수 있다.
+    kibana에서 로그를 볼 수 있다.
+
+* 도커/쿠버네티스 로그 관리 원칙
+    - 애플리케이션 로그는 모두 표준 출력으로 출력한다. 컨테이너로 운영하는 것을 전제로 한다면 파일 출력 자체가
+    불필요하다.
+    - nginx 등의 미들웨어는 로그가 표준 출력으로 출력되도록 이미지를 빌드한다.
+    - 표준 출력으로 출력되는 로그는 모두 json 포맷으로 출력해 각 속성을 검색할 수 있게 한다.
+    - 쿠버네티스 환경에서는 fluenct/fluenct-kubernetes-daemonset를 포함하는 파드를 DaemonSet를 사용해 각
+    호스트에 배치한다.
+    - 쿠버네티스 리소스에는 적절히 레이블을 부여해 로그를 검색할 수 있게 한다.
+
+    클라우드 환경에는 구글스택드라이버 등이 있따.
+
+    쿠버네티스 로그 열람을 돕는 도구로 stern이 있다. 
+    stern -l app=echo 
+    > echo
+    > nginx
+
+    다른 context도 --context 옵션으로 stern을 사용 할 수 있다.
+
+도커 호스트 및 데몬 운영
+    비 매니지드 환경에서 도커 호스트 및 도커 데몬을 직접 다루는 경우가 많다.
+
+    - 컨테이너의 라이브 리스토어
+        도커 데몬은 도커 이미지와 컨테이너, 네트워크를 관리하는 데몬이다.
+        docker 명령 자체도 컨테이너를 다루기 위해 이 도커 데몬과 통신하는 것이다. 그런 만큼 도커 데몬은
+        컨테이너를 실행하기 위해 꼭 필요한 것이지만, 사실 도커 데몬이 실행 중이 아니어도 컨테이너를
+        실행 방법이있다. 그것이 라이브 리스토어 기능이다. --live-restore 옵션을 붙이면 실행 중인
+        컨테이너를 정지하지 않고도 컨테이너를 정지 할 수 있다.
+
+        이런 방법으로 컨테이너 정지 없이 온더플라이 방식으로 업데이트 가능, 보안 업데이트 등 애플리케이션
+        컨테이너를 정지하지 않고 유지할 수 있다는 점이 큰 장점이다.
+
+        ex) 우분투 16.x systemd 도커를 서비스 형태로 운영 /lib/systemd/systemd/docker.service
+        [service]
+        ExecStart=/usr/bin/dockerd --live-restore
+
+        systemctl daemon-reload
+
+        ps -A | grep docker 
+        두개의 dockerd 프로세스가 동작 하고 있다.
+
+        service docker container stop
+        ps -A | grep docker 
+        dockerd가 정지 했음에도 컨테이너 프로세스가 아직 실행 중임을 볼수 있다.
+
+dockerd 튜닝하기
+    리눅스 계열에서 /etc/docker/daemon.json 파일을 수정하는 방법을 사용할 것(명령행으로 가능)
+
+    max_concurrent_downloads
+        docker image pull 명령에서 일어나는 이미지를 다운로드를 수행하는 스레드 수를 결정하는 옵션,
+        기본값은 3 -> 5
+    max_concurrent_uploads
+        docker image push 명령에서 일어나는 이미지 업롣를 수행하는 스레드 수를 결정하는 옵션,
+        기본값은 4다 -> 8
+    registry_mirror
+        도커 허브의 미러를 설정하는 옵션 도커 허브에서 이미지를 자주 내려받게 되면 허브에 불필요한
+        트래픽이 발생한다. 도커 호스트를 로컬에 레지스트리를 마련하고 이를 도커 허브의 미러로 사용
+        "registry_mirror":[
+            "http://localhost:5000"
+        ]
+
+        미러 레지스티리를 활성화하려면 도커 허브에서 받아온 이미지를 미러 레지스트리에 캐싱해야한다
+        그러므로 미러 레시스트리에서 도커 허브를 프록시로 설정해 이미지가 캐시되게 한다.
+        새로 만들 레지스트리의 설정파일 config,yaml을 작성한다.
+        proxy.remoteurl이 프록시 설정이므로 이 설정의 값을 도커 허브 레지스트리 URL로 설정하면된다.
+
+        docker container run -d -p 5000:5000 `
+        -v ${pwd}/config.yaml:/etc/docker/registry/config,yaml registry:2.6
+
+        crul http://localhost:5000/v2/_catalog
+
+
+장애대책
+    장애를 막기 위한 이미지 운영
+        이미지 빌드나 실행에 문제가 있는 경우, 의도하지 않은 내용의 컨테이너가 실행될 위험이있다.
+        - 운영환경에서 latest 버전의 이미지를 실행하거나 컨테이너 오케스트레이션 과정에서 최신 이미지를
+        실행한 상황
+        - latest 외의 버전 이미지를 덮어쓴 상황
+        - example/aaa:latest 태그로 빌드해야 할 이미지를 example/aaa:latest 태그로 빌드한 상황
+    이미지 테스트
+        이런 문제를 해결하려면 이미지가 원하는 구조로 되 있는지 확인 테스트 해야 한다.
+        container-structure-test가 많이 사용된다.
+        테스트 파일 test-tododb.yaml
+        fileExistenceTests는 컨테이너 안에 특정 파일의 존재 여부를 테스트하며 파일의 내용을 확인하는 테스트다.
+
+        container-structure-test test --image gihyodocker/tododb:latest --config test-tododb.yaml
+
+디스크 용량 부족에 주의 할 것
+    디스크 용량이 가득 차면 새로운 컨테이너를 실행할 수 없으며 기존 컨테이너의 실행에도 지장이 생긴다.
+    불필요한 이미지나 컨테이너는 디스크에서 삭제하는 것이 좋다.
+    docker system prune -a 명령이 유용
+    야간에 이 명령을 자동으로 실행하게끔 cron 설정을 스케줄링하면 된다.
+
+쿠버네티스 운영 시의 장애 대책
+    노드 다운 등 장애를 일으킬 수 있는 몇 가지 요인이 있다.
+    반드시 운영에 적용해야 할 장애 대책
+
+    -노드가 장애를 일으켰을 때 쿠버네티스는 어떻게 동작할까
+        쿠버네티스를 사용한다고 해도 서버를 운영한다는 점은 변함이 없다, 그러므로 서버 장애로 인해
+        노드가 정상 작동하지 않을 가능성을 염두에 두고 파드를 배포해야 한다.
+
+        다운된 노드에 배포된 모든 파드는 즉시 정지되며 정상적인 다른 노드로 재배치된다.
+        이러한 기능을 오토힐링이라고 한다.
+
+        즉, 쿠버네티스에서는 레플리카세트를 관리하는 디플리오먼트나 스테이트풀세트, 데몬세트를 이용해
+        파드를 생성하는 것이 가장 좋은 대책이다.
+
+    - 파드 안티 어피니티를 이용해 장애에 강한 파드 배치 전략 수립하기
+        오토힐링 기능은 편리하지만 완벽하지는 않다. replicas=1 이거나 노드가 다운된 순간부터 다른
+        노드로 재배치 되는 동안에는 다운타임을 피할 수 없다.
+
+        그러므로 임의의 노드가 다운돼도 문제가 발생하지 않도록 파드가 여러 노드에 나눠 배치되야 한다.
+        이를 위해 replicas 값을 적절히 조절하는 방법을 사용한다.
+
+        하지만 쿠버네티스는 시스템 리소스가 여유 있는 노드를 골라 파드를 배치하기 때문에 
+        같은 노드에 같은 파드를 여러 개 배치할 가능성을 배제할 수 없다.
+
+        이를 해결하는 기능이 파드 안티어피니티(pod antiaffinity)이다. c파드가 배치된 노드에는 D파드를
+        배치하지 말것 과 같은 규칙을 정의할 수 있다. spec.affinity.podAntiAffinity 설정에 이를 정의 한다.
+
+        배치잡처럼 일시적으로 cpu 자원을 많이 사용하는 파드를 실행하는 경우, 같은 노드에 배치된 다른
+        파드의 성능을 떨어뜨린다. 이런 경우에는 CPU 자원을 과도하게 소모하는 파드를 전용 노드로 격리해서 다른
+        파드에 대한 영향을 차단해야 한다.
+
+        이를 위해서는 먼저 노드에 용도별로 구분 짓는 레이블을 부여하고 파드 배치 규칙에 해당 레이블을
+        갖는 노드에만 파드를 배치하면 된다. 특정 레이블이 부여된 노드에만 파드를 배치하는 규칙을 정의
+        하는 것이 노드 어피니티 이다.
+
+        노드 레이블을 부여하려면 instancegroup 값을 설정하면된다. 웹 어플리케이션이나 api파드만을 배치할 노드가
+        에는 webapi 배치잡만을 처리하는 노드에는 batch라는 레이블을 붙여 용도를 구분한다.
+        이를 위해 spec.affinity.nodeAffinity 속성을 정의한다.
+
+        노드 어피니티를 이용해 파드를 부하 수준에 맞는 노드로 배치할 수 있으며, 다른 파드의 성능저하를
+        방지할 수 있다.
+
+        그 외의 레이블 부여 방법
+
+        kubctl label nodex node-batch1 instancegroup=batch intance=group이라는 레이블을 어떤 노드에 
+        붙이고, 이미 존재하는 노드에 레이블을 부여하는 것 
+
+    HPA를 이용한 파드 오토 스케일링
+        시스템 리소스를 사용률에 따라 파드 수를 자동으로 조정하는 쿠버네티스 리소스다.
+        HPA는 파드의 오토 스케일링 조건을 디플로이먼트나 레플리카세트에 부여하기 위한 리소스다.
+
+        노드에 대한 파드의 CPU 사용률이 40퍼센트를 넘었을 때 파드에 오토 스케일링을 적용한다.
+
+        생성된 kubctl get hpa 로 확인 가능하다.
+
+    cluster autoscaler를 이용한 노드 오토스케일링
+        쿠버네티스 리소스가 아니라 노드 오토 스케일링 기능을 제공하는 별도의 도구다.
+        gcloud container clusters create gihyo --cluster-version=1.9.7-gke.1 `
+        --machine-type=n1-standard-1 `
+        --num-nodes=5 `
+        --enable-autoscaling `
+        --min-nodes 3 `
+        --max-nodes 10
+
+        gke 외는 직접 helm으로 직접 해야 한다.
+        helm install --namespace kube-system --name cluster-autoscaler stable/cluster-autoscaler  
+    
+    helm의 릴리스 히스토리 제한
+        kubctl -n kube-system get configmap
+            헬름을 이용하는 쿠버네티스 클러스터는 애플리케이션 명과 버전명이 붙은 컨피그맵이 생성되어 있다.
+
+        helm init --history-max 20 으로 최대 저장 건수를 정하는 것이 좋다.
+
+        GKE-On-Prem으로 온프레미스에서도 개발 환경을 쾌적하게 유지할 수 있다.

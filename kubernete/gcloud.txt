@@ -1,0 +1,134 @@
+- gcloud 
+
+    //구글 클라우드 SKD(gcloud) 설치
+    glcoud components update
+
+    gcloud auth login 
+
+    //gcloud로 조작할 대상 프로젝트 id를 생성한다.
+    gcloud config set project gihyo-dube-xxxx
+
+    //기본리전을 지정한다(지역)
+    gcloud config set conpute/zone asia-northeast1-auth
+
+    gcloud container clusters create gihyo --cluster-version=1.10.4-gke.2 `
+    --machine-type=n1-standard-1 `
+    --num-nodes=3
+
+    클러스터 버전, 노드의 갯수 지정
+
+    glcoud container cluster describe gihyo 로 확인 가능
+
+    //gloud로 클러스터를 제어할 수 있도록 kubectl에 인증정보를 설정한다.
+    gcloud container clusters get-credential gihyo
+
+    kubectl get nodes
+
+    kubectl proxy
+    localhost:8001로 접속하면 접근가능하다.
+
+        kubectx 쿠버네티스 클러스터를 여러 개 다룰 때 정보 확인 대상을 매번 전환하기가 번거로운 경우가 있다.
+        kubectx 를 사용하면 컨텍스트 스위칭을 쉽게 할 수 있다.
+
+        kubens kube-system으로 컨텍스트 네임스페이스를 지정할수있다.
+
+    디비(DB)설정
+
+    쿠버네티스는 호스트에서 분리할 수 있는 외부 스토리지를 볼륨으로 사용할수있다. 다른 호스트로 재배치돼도 외부 스토리지 형태의 볼륨은 새로 배치된
+    호스트에 자동으로 할당된다.
+
+        -퍼시스턴트볼륨 : 클러스터가 구축된 플랫폼을 지원하는 퍼시스턴트볼륨
+        -퍼시스턴트볼륨클레임 : 추상화된 논리 리소스로 퍼시스턴트볼륨과 달리 용량을 필요한 만큼 동적으로 확보할 수 있다.
+        -스토리지클래스 : 퍼시스턴트볼륨으로 확보한 스토리지의 종류를 정의하는 리소스이다. GCP는 표준과 ssd가 있다.
+        -스테이트풀세트 : 데이터 스토어 처럼 데이터를 계속 유지하는, 상태가 있는 애플리케이션을 관리하는데 적합한 리소스다.
+            (디플로이먼트는 하나만 있으면 되는 파드 혹은 퍼시스턴스 데이터를 갖지않는 상태가 없는 애플리케이션을 배포하는데 적합)
+
+    kubectl apply -f mysql-master.yaml
+    kubectl apply -f mysql-slave.yaml
+
+    //결과확인 
+    kubectl get pod 
+    //
+    kubectl exec -it mysql-master-0 init-data.sh
+
+    kubectl exec -it mysql-slave-0 bash
+        mysql -u root -pgihyo todob -r "SHOW TABLES;"
+
+    kubectl get pod -l app=todoapi (yaml apply하고)
+
+    todo-web(assets 쿠버네티스 볼륨 역시 도커 볼륨과 마찬가디로 데이터를 영구 보존하기 위해 사용하는 기능이다.)
+
+    가상 볼륨을 통해 컨테이너 간에 디렉터리를 공유하게 됨
+    -> Nginx 컨테이너에 복사하는 과정 
+    이럴경우, lifecycle 이벤트를 이용하는 것이 좋다. 시작되거나 종료 될 때 임의의 명령어를 실행하게 해주는 기능이다.
+
+    web > cp -R /todoweb/.nuxt/dist /
+    web > ls -l /dist
+
+    nginx ls -l /var/www/_nuxt/       같은 애셋파일 위치
+
+    kubectl get svc todoweb -> 서비스는 나중에 인그레스를 외부로 노출시킬 수 있도록 타입을 NodePort로 한다. 
+
+    인그레스로 서버 노출
+
+- kubespray로 쿠버네티스 클러스터를 구축한다.
+    kubespray는 구성 관리 도구인 앤서블을 사용하여 쿠버네티스 클러스터를 구축하는 도구다.
+        - 작업용 서버 1개
+        - 쿠버네티스 마스터 서버 3대
+        - 쿠버네티스 노드 서버 1대
+        - 위 서버의 운영 체제는 모두 우분투 16.04
+        - 모든 서버는 폐쇄된 로컬 네트워크에 구축되며 모두 사설 ip주소를 갖는다.
+
+    1.앤서블은 작업용 서버에서 ssh를 통해 실행된다. 
+    ssh-keygen -t rsa 키생성
+    
+    2.모든 마스터 서버 및 노드 서버의 root 사용자에 대해 반복해 공개키를 등록한다.
+    echo "ssh-rsa ASFSDA#34123d .." >> ~/.ssh/authorized_keys
+
+    3. IPv4 포워딩 활성화
+        kubespary를 실행하기 위해 구축 대상 서버의 IPv4 포워딩을 활성화한다. (/etc/sysctl.conf net.upv4.ip_forward 주석해제)
+    
+    4. 작업용 서버에 kubespray 설치
+        php install ansible netaddr
+        git clone https://github.com/kubernetes-incubator/kubespray
+        cd kubespary && git checkout v2.5.0
+        pip install -r requirements.txt 
+
+        앤서벌의 인벤토리(서버설정)
+        cp -rtp inventory/sample inventory/mycluster
+        declare -a IPS=(ip ip)
+        CONFIG_FILE=inventory/mycluster/hosts.ini pythoon3
+        contrib/inventory_builder/inventory.py
+
+        클러스터를 구성하는 서버 설정 -inventory/mycluster/hosts.ini
+        inventory를 설정할 때 IPS 변수로 전달했던 IP 주소가 있을 것, 미리 정해둔 서버이름으로 수정한다.
+
+        [all]
+        master01 ansible_host=ip ip=ip
+
+        [kube-master]
+        master01
+
+        [kube-node]
+        node01
+
+        [etcd]
+        master01
+
+        [k9s-cluster:children]
+        kube-node
+        kube-master
+
+        [calico-rr]
+
+        [vault]
+
+        쿠버네티스 설정 inventory/mycluster/group_vars/k8s-cluster.yaml
+        대시보드 통합 설치 여부 등을 설정할 수 있다.
+
+        클러스터 구축 명령어
+        
+        ansible-playbook -i inventory/mycluster/hosts.ini cluster.yml
+
+        get nodes
+        결과 출력

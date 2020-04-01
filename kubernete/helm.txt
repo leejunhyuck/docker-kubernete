@@ -1,0 +1,109 @@
+helm 설치 후, 
+
+helm init 그럼 tillter라는 서버 애플리케이션이 kube-system 네임스페이스에 배포된다.
+
+kubectl -n kube-system get service,deployment,pod --selector app=helm
+tillter 확인 가능 
+
+helm version 클라이언트와 서버의 버전이 각각 출력된다.
+
+helm init -upgrade로 최신 안정 버전으로 업그레이드 한다.
+
+헬름의 구성유소 (사진)
+
+    local : 헬름 클라이언트가 설치된 로컬 리포지토리로, 로컬에서 생성한 패키지가 존재한다.
+    stable : 안정 버전에 이른 차트가 존재하는 리포토리다 안정된 보안 수준과 기본 설정값을 포함하는 등 일정한 요건을 만족하는 차트만 제공 될 수있다.
+    incubator : stable 요건을 만족하지 못하는 차트가 제공되는 레포지토리다 가까운 시일 내에 stable로 넘어갈 예정인 차트가 제공된다.
+
+    stable 리포지토리는 기본값으로 사용되고, incubator 리포지토리는 기본값으로 사용되지는 않으나 추가 할 수 있다.
+    helm repo add incubator https://kubernetes-charts-incubator.storage.googleapis.com/
+
+    helm search
+    
+차트 (구성 사진)
+    차트는 애플리케이션의 동작을 제어하는 설정의 기본값을 기본값 value 파일에 해당하는 values.yaml 파일에 정의한다.
+    설치할 때 이 기본값을 변경하려면 기본값 value 파일에서 변경할 값만 수정한 커스텀 value 파일을 만든다.
+
+프로젝트 관리 도구인 레드마인의 차트인(stable/redmine) 설치한다.
+    helm install -f redmine.yaml --name redmine stable/redmine --version 4.0.0
+    helm ls // 설치된 것을 확인 할수 있다.
+    kubectl get service,deployment --selector release=redmine //NodePort로 생성된것을 확인
+
+    헬름으로 설치된 릴리스를 업데이트 하려면 
+    helm upgrade -f redmine.yaml redmine stable/redmine --version 4.0.0
+
+    제거하려면 
+    helm delete redmine
+
+    제거 하여도 롤백 기능이 있기 때문에 리비전으로 돌아갈 수 있다.
+    helm ls -all
+    helm rollback redmine 2
+
+    리비전 기록을 남기지 않고 애플리케이션을 완전히 제거하려면 
+    helm del --purge redmine
+
+RBAC를 지원하는 애플리케이션 설치
+    cluster-admin 롤을 갖는 서비스 계정을 생성한 다음, 이 계정을 실행 중인 틸러의 서비스 계정으로 설정한다.
+    kubectl create serviceaccount tiller --namespace kube-system
+
+    kubectl create clusterrolebinding tiller-cluster-reul `
+    --Clusterrole=cluster-admin --serviceaccount=kube-system:tiller
+
+    kubectl patch deploy --namespace kube-system tiller-deploy `
+    -p {"spec":{"template":{"spec":{"serviceAccount":"tiller"}}}}
+
+    jenkins.yaml
+        rbac:
+        install: true
+    수정한다.
+
+    helm install -f jenkins.yaml --name jenkins stable/jenkins
+    kubectl describe sa,clusterrolebinding -l app=jenkins-jenkins
+
+차트는 쿠버네티스 환경을 추상화하고 패키징해 배포하기 위한 것이다, 매니페스트 파일을 복사해 하나 이상의 환경에 배포하는 방식보다 유지 보수성이 좋다.
+
+    1. 로컬 리포지토리 활성화 하기
+        helm repo list 
+            로컬 리포지토리는 헬름이 실행되는 호스터 머신에 위치한다.
+            조회해서 나오는 URL에 해당하는 웹 서버는 실행되지 않는다. 
+            이 URL에 HTTP프로토콜로 접근할 수 있어야 우리가 만드는 차트를 사용할 수 있으므로 이 웹서버를 실행한다.
+        helm create serve &
+    2. 차트 템플릿 작상하기
+        먼저 차트의 디렉터리 구조를 만들어야한다, nginx와 echo로 구성된 애플리케이션을 만든다면
+        helm create echo로 만들면 된다.
+        각 컨테이너의 설정값은 기본값 value 파일의 변수를 참조한다.
+        템플릿에서 .Value로 시작하는 변수를 사용 가능하다.
+        (인그레스는 배포환경에 따라 커스터마이징이 많이 발생하는 부분이다.)
+
+    helm package echo -> echo-버전.tgz 이름으로 패키징이 완료된다.
+
+    helm search echo local/echo로 결과를 확인 할수 있다.
+
+    패키징된 차트 설치하기
+        로컬 환경에서 변경이 필요한 설정값이 담긴 커스텀 value 파일만 갖추면 된다.
+        ingress:
+            enable: true
+            hosts:
+                - ch06-echo.gihyo.local
+
+        helm install -f 커스텀.yaml --name echo local/echo
+
+        조회
+
+        kubectl get deployment,service,ingress --selecter app=echo
+
+        curl http://localhost -H "HOST: ch06-echo-gihyo.local"
+    
+    차트 사용자 리포지토리 구축
+        패키징된 차트는 로컬 리포지토리엣 불러다 사용할 수 있지만, 팀 개발 업무에서 이 차트를 사용하려면 중앙에서 관리하는 원격 리포지토리가 필요하다.
+
+        helm create example
+        helm package example
+        helm repo index .
+
+        helm repo add gihyo-stable 깃깃 허브 주소
+        helm repo update
+        helm search update
+
+        helm install --namespace default --name example gihyo-stable/example 
+

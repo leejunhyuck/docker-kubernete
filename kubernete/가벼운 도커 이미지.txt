@@ -1,0 +1,92 @@
+도커 이미지가 증가에 따라 나타나는 문제
+    - 이미지 빌드 시간
+    - 이미지를 도커 레지시트리에 등록하는 시간
+    - 컨테이너를 실행할 호스트 혹은 노드에서 이미지를 다운로드 하는 시간
+
+    - 클러스터를 구성하는 노드의 디스크 용량 낭비
+    - CI 소요 시간 증가
+    - 개발 중 시행착오 소요 시간 증가로 인한 생상선 저하
+    - 오토 스케일링으로 컨테이너가 투입되는 소유 시간 증가
+
+크기가 작은 가벼운 이미지를 만드는 데 유리한 기반 이미지들
+    - scratch 빈 도커 이미지로 도커가 이름을 예약한 특수 이미지다.
+    - 네이티브 라이브러리 링크
+        빌드 시 네이티브 의존 라이브러리를 정적 링크하도록 하면 이미지를 만드는 수고를 크게 덜 수 있다.
+    - 루트 인증서
+        TLS/SSL이 적용된 웹사이트에 접근 해야 한다.
+        /etc/ssl/certs 디렉티러에 추가한다 (루트인증서)
+    - busybox 임베디드 시스템에서 많이 사용하는 리눅스 배포판으로 크기가 매우 작다는 것이 특징이다.
+
+알파인 리눅스
+    apk add nodejs
+    apk search
+    apk update
+    --virtual=build-deps ruby-deb perl-dev
+    별칭을 붙여서 빌드용으로만 사용한다 
+    apk del 별명 으로 빌드 후 삭제 가능
+    --no-cache /var/cache/apk 디렉터리에 캐시를 저장하지 않기 위해 사용
+
+.dockerignore
+    .git
+    .idea
+    *.swp
+    *.log
+    .DS_STORE
+
+도커 이미지의 레이어 구조 고려하기
+    도커 이미지는 Dockerfile에 작성된 명령을 단위로 레이어를 구성한다. 명령 1개마다 레이어가 만들어 진다.
+    docker image history 이름 로 해당 이미지가 어떤 레이어로 구성되는지 자세한 정보를 볼 수 있다.
+
+    레이어의 수 최대한 줄이기
+
+멀티 스테이지 빌드
+    빌드컨테이너와 실행 컨테이너의 분리
+        반드시 적용하여야 함 
+    From 이미지명 AS 컨테이너명
+
+    From 이미지명
+    COPY --from=build 만들어진 경로 /usr/local/bin
+
+언어에 중점을 둔 distroless 이미지
+    운영체제를 포함하지 않고 언어에 중점을 둔 도커 이미지를 말한다. 주로 구글이 만들어 공개했다.(go , rust 언어)
+    FROM gcr.io/distroless/base (java,cc,python23,nodejs,dotnet...)
+
+개발 환경 통일하기
+    고성능 mysql 클라이언트 mycli redist-tools 등
+    쿠버네티스
+    kubectl run -i --rm --tty workspace --image=ch10/workspace:latest --restart=Never -- bash -il
+
+hadolint를 실행하는 도커 컨테이너로 이 Dockerfile의 문법 검사를 수행함
+docker container run --rm -i hadolint/hadolint < Dockerfile
+
+이미지에서 명령행 도구 버전 변경하기
+    항상 최신버전(보안 패치가 모두 완료된)을 사용하고 싶다
+    버전이 바뀔 떄마다 변경 사항이 많은 도구라서 특정 버전을 고정적으로 사용하고 싶다.
+
+부하 테스트 
+    로커스트(locust) 도커 컨테이너로 부하테스트를 수행한다.
+    여러 개의 호스트를 이용한 분산 실행을 지원한다.
+    jmeter가 가장 유명, GUI를 사용해야해서 복잡하고 장벽이 높음
+
+    대부분의 테스트 도구는 마스터-슬레이브 구성을 취한다
+    마스터는 슬레이브에 요청 실행 및 결과 요약을 요청하고, 슬레이브는 이 요청에 따라 테스트 대상에
+    실제 요청을 전송하는 역할을 맡는다.
+
+
+
+
+보안 
+    - 공개된 도커 이미지의 안정성 확인 필요!
+    - Quay.io 설치된 패키지를 통해 취약점 포함 여부를 확인
+    - docker bench for security
+        도커를 적용 할 때 반드시 따라야 할 베스트 프랙티스의 준수 여부를 검사하는 도구 취약점 발견하는데 유용
+    - 컨테이너 파일을 추가하면서 발생하는 위협
+        copy는 파일을 복사하는데 ADD는 URL의 내려받아 추가할수도 있다 체크섬 정보로 공개키와 비교한다
+        gpg --verify 
+    - /var/run/docker.sock의 컨테이너와의 공유금지
+    - 실행용 사용자 추가
+        RUN useradd gihyo
+        USER gihyo
+    - 기밀정보 취급
+        - 환경변수를 이용하는 방법
+        - 기밀정보를 외부에서 받아오는 방법(IAM,Vault 등)

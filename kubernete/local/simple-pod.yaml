@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: simple-echo
+spec:
+  containers:
+  - name: nginx 
+    image: gihyodocker/nginx:latest 
+    env: 
+    - name: BACKEND_HOST
+      value: localhost:8080
+    ports:
+    - containerPort: 80 
+  - name: echo
+    image: gihyodocker/echo:latest
+    ports:
+    - containerPort: 8080
+
+
+    kubectl apply -f simple-pod.yaml
+
+    kubectl get pod
+    Ready > 2/2 분모 정의된 컨테이너의수 분자 실행 상태의  컨테이너수
+
+    kubectl exec -it simple-echo sh -c nginx (-c 옵션으로 컨테이너 명 지정)
+    kubectl delete pod simple-echo
+    kubectl delete -f simple-pod.yaml 매니페스트에 작성된 리소스 전체가 삭제 
+
+    파드와 파드안에든 컨테이너의 통신
+    파드에는 각각 고유의 가상 ip주소가 할당된다 
